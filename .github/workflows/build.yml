@@ -1,4 +1,4 @@
-﻿name: Build Aseprite
+name: Build Aseprite
 
 on:
   workflow_dispatch:
@@ -6,61 +6,51 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    permissions:
-      contents: write
     steps:
       - name: Enable Long Paths
-        run: git config --system core.longpaths true
+        run: Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1
 
       - name: Install Ninja
-        run: choco install ninja -y --no-progress
+        run: choco install ninja
 
-      - name: Clone Aseprite with Submodules
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Clone Aseprite Recursive
         run: |
           git clone --recursive --depth 1 --branch v1.3.15 https://github.com/aseprite/aseprite.git aseprite
 
-      - name: Download Skia m102
-        shell: powershell
+      - name: Download Skia m124
         run: |
-          Invoke-WebRequest -Uri "https://github.com/aseprite/skia/releases/download/m102-861e4743af/Skia-Windows-Release-x64.zip" -OutFile "skia.zip" -UseBasicParsing
-          Expand-Archive -Force "skia.zip" "skia"
+          Invoke-WebRequest -Uri "https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Windows-Release-x64.zip" -OutFile "skia.zip"
+          Expand-Archive -Path "skia.zip" -DestinationPath "skia"
 
-      - name: Initialize MSVC Environment
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Configure CMake
-        shell: powershell
+      - name: CMake Configure
         run: |
-          $abs_src = Join-Path $env:GITHUB_WORKSPACE "aseprite"
-          $abs_skia = Join-Path $env:GITHUB_WORKSPACE "skia"
-          $abs_build = Join-Path $env:GITHUB_WORKSPACE "build"
-          mkdir $abs_build -Force
-          Set-Location $abs_build
+          New-Item -ItemType Directory -Force -Path "aseprite\build"
+          Set-Location "aseprite\build"
           cmake -G Ninja `
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DCMAKE_BUILD_TYPE=Release `
             -DLAF_BACKEND=skia `
-            -DSKIA_DIR="$abs_skia" `
-            -DSKIA_LIBRARY_DIR="$abs_skia\out\Release-x64" `
-            -DSKIA_LIBRARY="$abs_skia\out\Release-x64\skia.lib" `
-            -DENABLE_UPDATER=OFF `
-            -DENABLE_TESTS=OFF `
-            "$abs_src"
+            -DSKIA_DIR="$env:GITHUB_WORKSPACE\skia" `
+            -DSKIA_LIBRARY_DIR="$env:GITHUB_WORKSPACE\skia\out\Release-x64" `
+            -DSKIA_LIBRARY="$env:GITHUB_WORKSPACE\skia\out\Release-x64\skia.lib" `
+            ..
 
-      - name: Compile Aseprite
+      - name: Build Aseprite
         run: |
-          cd build
+          Set-Location "aseprite\build"
           ninja aseprite
 
-      - name: Package Portable Zip
-        shell: powershell
+      - name: Prepare Artifact
         run: |
-          mkdir dist -Force
-          Copy-Item "build\bin\aseprite.exe" -Destination "dist\" -Force
-          Copy-Item "build\bin\data" -Destination "dist\data" -Recurse -Force
-          Compress-Archive -Path "dist\*" -DestinationPath "Aseprite-Portable.zip"
+          New-Item -ItemType Directory -Force -Path "dist"
+          Copy-Item -Path "aseprite\build\bin\*" -Destination "dist" -Recurse
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Aseprite-Windows-x64
-          path: Aseprite-Portable.zip
+          name: Aseprite-Windows-v1.3.15
+          path: dist
